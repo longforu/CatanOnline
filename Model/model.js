@@ -16,7 +16,7 @@ const compareDoubleArray = ([x1,y1],[x2,y2])=>x1===x2 && y1===y2
 const comparePositions = (head1,head2)=>{
     const position1 = _.chunk(head1,2)
     const position2 = _.chunk(head2,2)
-    for(p of position2){
+    for(let p of position2){
         let found = false
         for(let i = 0;i<position1.length;i++){
             if(compareDoubleArray(position1[i],p)){
@@ -377,7 +377,7 @@ const doCreateGrid = (()=>{
                             [port(),sea(),port(),sea()],
                     [sea(),resource(),resource(),resource(),port()],
             [port(),resource(),resource(),resource(),resource(),sea()],
-        [sea(),resource(),resource(),resource(),resource(),resource(),sea()],
+        [sea(),resource(),resource(),resource(),resource(),resource(),port()],
             [port(),resource(),resource(),resource(),resource(),sea()],
                     [sea(),resource(),resource(),resource(),port()],
                             [port(),sea(),port(),sea()]
@@ -409,9 +409,9 @@ const gridFunctionFactory = (func)=>
 //BELOW: all possible intersections in a board.
 const allGridLocation = [
     [0,0,1,0,1,1],[0,0,1,1,0,1],[0,1,1,1,1,2],[0,1,1,2,0,2],[0,2,1,2,1,3],[0,2,0,3,1,3],[0,3,1,3,1,4],
-    [1,0,2,0,2,1],[1,0,2,1,1,1],[1,1,2,1,2,2],[1,1,2,2,1,2],[1,2,1,2,1,3],[1,2,2,3,1,3],[1,3,2,3,2,4],[1,3,1,4,2,4],[1,4,2,4,2,5],
-    [2,0,3,0,3,1],[2,0,3,1,2,1],[2,1,3,1,3,2],[2,2,3,2,3,3],[2,2,3,3,2,3],[2,3,3,3,3,4],[2,3,3,4,2,4],[2,4,3,4,3,5],[2,4,2,5,3,5],[2,5,3,5,3,6],
-    [3,0,4,0,3,1],[3,1,4,0,4,1],[3,1,4,1,3,2],[3,2,4,2,3,3],[3,2,4,1,4,2],[3,3,4,2,4,3],[3,3,3,4,4,3],[3,4,4,3,4,4],[3,5,4,4,4,5],[3,5,3,6,4,5],
+    [1,0,2,0,2,1],[1,0,2,1,1,1],[1,1,2,1,2,2],[1,1,2,2,1,2],[1,2,2,3,1,3],[1,2,2,2,2,3],[1,3,2,3,2,4],[1,3,1,4,2,4],[1,4,2,4,2,5],
+    [2,0,3,0,3,1],[2,0,3,1,2,1],[2,1,3,1,3,2],[2,1,2,2,3,2],[2,2,3,2,3,3],[2,2,3,3,2,3],[2,3,3,3,3,4],[2,3,3,4,2,4],[2,4,3,4,3,5],[2,4,2,5,3,5],[2,5,3,5,3,6],
+    [3,0,4,0,3,1],[3,1,4,0,4,1],[3,1,4,1,3,2],[3,2,4,2,3,3],[3,2,4,1,4,2],[3,3,4,2,4,3],[3,3,3,4,4,3],[3,4,4,3,4,4],[3,4,3,5,4,4],[3,5,4,4,4,5],[3,5,3,6,4,5],
     [4,0,5,0,4,1],[4,1,5,0,5,1],[4,1,4,2,5,1],[4,2,5,1,5,2],[4,2,5,2,4,3],[4,3,5,2,5,3],[4,3,4,4,5,3],[4,4,5,3,5,4],[4,4,4,5,5,4],
     [5,0,5,1,6,0],[5,1,6,0,6,1],[5,1,5,2,6,1],[5,2,6,1,6,2],[5,2,6,2,5,3],[5,3,6,2,6,3],[5,3,5,4,6,3]
 ]
@@ -718,7 +718,7 @@ const doDiceRoll = asyncWrapper(async (game,roll)=>{
 
     await game.save()
 })
-
+//TODO: FIX WORLD GENERATING
 const doUseMonopolyCard = asyncWrapper(async (game,playerid,resource)=>{
     let totalResourceChange = 0
     const resourceName = resource.toLowerCase() + 'Amount'
@@ -738,7 +738,12 @@ const findOutIfItIsAValidPlaceToMoveTheRobber = asyncWrapper(async (game,positio
     return possibles.includes(position)
 })
 
-module.exports = {doBuildRoadInitial, doBuildSettlementInitial,addPlayerToGame,playerSchema,gridSchema,gameSchema,Player,Grid,Game,findPoint,findTotalKnight,findPossibleActions,findLongestRoadLength,doBuyDevelopmentCard,doUseDevelopmentCard
+const passTurn = asyncWrapper(async (game)=>{
+    game.onTurn++
+    game.save()
+})
+
+module.exports = {passTurn,doBuildRoadInitial, doBuildSettlementInitial,addPlayerToGame,playerSchema,gridSchema,gameSchema,Player,Grid,Game,findPoint,findTotalKnight,findPossibleActions,findLongestRoadLength,doBuyDevelopmentCard,doUseDevelopmentCard
 ,doBuildSettlementPlayer,doBuildCityPlayer,doBuildRoadPlayer,canBuildSettlementPlayer,canBuildRoadPlayer,doCreateGrid,allGridLocation,findPossibleInitialSettlementLocation,findResourceFromDice,doBuildSettlementGrid,
 doBuildCityGrid,doBuildRoadGrid,findAdjacentPositionsTo,thereIsAStructureAt,findValidPlacesToBuildAStructure,findIfThereIsARoadAt,findRobberProspectiveLocations,doMoveRobberTo,doCreateGame,doBuildSettlement,doBuildCity,
 doBuildRoad,findAllPossibleRoadLocationFor,findWinCondition,doChangePlayerResource,canBuyDevelopmentCardPlayer,doUseMonopolyCard,findOutIfItIsAValidPlaceToMoveTheRobber}
