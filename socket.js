@@ -39,10 +39,13 @@ module.exports = (io)=>{
             socket.emit('Error',{error})
         }
         const asyncSocketWrap = (func)=>async (...args)=>{
+            console.log(...args)
             try{return await func(...args);} catch({message}){return socketError(message);}
         }
 
         const socketFunctionFactory = (func)=>asyncSocketWrap(async(...args)=>{
+            socket.game = await Game.findOne({roomCode:socket.roomCode})
+            socket.user = socket.game.players[socket.userid]
             return await func(...args)
         })
 
@@ -78,9 +81,10 @@ module.exports = (io)=>{
             //Still have to check in game because multiple messages may be sending at the same time
             if(!socket.game.inGame){
                 socket.game.inGame = true
-                await buildInitialStructure()
                 await socket.game.save()
                 io.to(socket.game.roomCode).emit("Game starting")
+                await buildInitialStructure()
+                
                 actionNeeded()
             }
         })
@@ -92,8 +96,9 @@ module.exports = (io)=>{
             actionNeeded()
         }
 
-        const endGame = (winner)=>{
-            emit({winner})
+        const endGame = async (winner)=>{
+            await Game.findByIdAndDelete(socket.game._id)
+            emit('End game',{winner})
         }
 
         const actionNeeded = async ()=>{
@@ -107,12 +112,18 @@ module.exports = (io)=>{
 
         const moveRobber = async ()=>{
             const position = await awaitAction('Choose Knight location')
-            const robbable = await doMoveRobberTo(socket.game,position)
+            console.log('position',position)
+            let robbable = await doMoveRobberTo(socket.game,position)
+            robbable = robbable.filter(e=>e!==socket.userid)
+            console.log(robbable,'robabble')
             if(!robbable) throw Error('Position Invalid')
-            emitWithoutSelf('Move Knight',{position})
-            const willBeRob = await awaitAction('Choose who to steal from')
-            const resource = await doStealFromAnotherPerson(socket.game,socket.userid,willBeRob)
-            emit('Resource Stolen',{resource})
+            emit('Move Knight',{position})
+            if(robbable.length){
+                const willBeRob = await awaitAction('Choose who to steal from')
+                if(!robbable.includes(willBeRob)) throw Error("You cannot rob that person")
+                const resource = await doStealFromAnotherPerson(socket.game,socket.userid,willBeRob)
+                emit('Resource Stolen',{resource,robbed:willBeRob})
+            }
         }  
 
 
@@ -144,8 +155,8 @@ module.exports = (io)=>{
         const getTurnSpecificInfo = (property)=>turnSpecificInfo.get(socket.roomCode)[property]
 
         const addNewTradingThread = (player1,player2)=>{
-            const characters='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-            let randomCode
+            const characters='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.split('')
+            let randomCode = ''
             for(let i = 0;i<7;i++) randomCode+=characters[_.random(characters.length-1)]
             if(!tradingThreads.has(socket.roomCode)) tradingThreads.set(socket.roomCode,new Map())
             tradingThreads.get(socket.roomCode).set(randomCode,[player1,player2])
@@ -168,11 +179,20 @@ module.exports = (io)=>{
             if(canTradeWithCode(code)) return await func({resources,code})
         }))
 
-        const actionFunctionFactory = (func,message)=>socketFunctionFactory(async (data)=>{
+        const actionFunctionFactory = (func,message,specialC)=>socketFunctionFactory(async (data)=>{
             const phase = getTurnSpecificInfo('phase')
             if(getTurnSpecificInfo('state') !== 'normal') throw new Error("You cannot do that action at this time")
             if((phase === 1||phase === 2) && socket.userid === socket.game.onTurn){
-                try{await func(data);emit(message,data)}catch(e){throw new Error(e.message)}
+                try{await func(data);if(!specialC) emit(message,data)}catch(e){throw new Error(e.message)}
+            }
+            else throw new Error('Not your turn')
+        })
+
+        const developmentCardFunctionFactory = (func)=>socketFunctionFactory(async (data)=>{
+            const phase = getTurnSpecificInfo('phase')
+            if(getTurnSpecificInfo('state') !== 'normal') throw new Error("You cannot do that action at this time")
+            if((phase === 1||phase === 2) && socket.userid === socket.game.onTurn){
+                try{await func(data)}catch(e){throw new Error(e.message)}
             }
             else throw new Error('Not your turn')
         })
@@ -206,16 +226,18 @@ module.exports = (io)=>{
             }
         })
 
-        const attachActionToSocket = (message,func)=>socket.on(message,actionFunctionFactory(func,message))
+        const attachActionToSocket = (message,func,specialC)=>socket.on(message,actionFunctionFactory(func,message,specialC))
         const attachPhase1ActionToSocket = (message,func)=>socket.on(message,phase1ActionFunctionFactory(func,message))
         const attachPhase2ActionToSocket = (message,func)=>socket.on(message,phase2ActionFunctionFactory(func,message))
         const attachWaitingActionToSocket = (message,func)=>socket.on(message,waitingFunctionFactory(func,message))
+        const attachDevActionToSocket = (func)=>socket.on('Use development card',developmentCardFunctionFactory(func))
 
-        const actionAwaitable = ['Choose Monopoly resources','Choose Plenty resources','Choose Knight location','Choose who to steal from','Choose road location','Choose settlement location','Choose city location']
+        const actionAwaitable = ['Choose Road location','Choose Monopoly resources','Choose Plenty resources','Choose Knight location','Choose who to steal from','Choose road location','Choose settlement location','Choose city location']
         const actionAwaitableFunction = actionAwaitable.map(e=>[])
         actionAwaitable.forEach((e,i)=>socket.on(e,(data)=>actionAwaitableFunction[i].forEach(f=>f(data))))
         const awaitAction = async (message)=>new Promise((resolve,reject)=>{
             let done = false
+            emit(`Waiting for ${message}`)
             actionAwaitableFunction[actionAwaitable.indexOf(message)].push((data)=>{done = true;resolve(data)})
             setTimeout(()=>{
                 if(!done) reject()
@@ -232,6 +254,7 @@ module.exports = (io)=>{
         socket.roomCode = roomCode
         socket.userid = userid
         socket.game = await Game.findOne({roomCode})
+        console.log(socket.game)
         socket.user = socket.game.players[socket.userid]
         socket.username = socket.game.playerUsernames[socket.userid]
         socket.join(socket.roomCode)
@@ -259,47 +282,51 @@ module.exports = (io)=>{
             const result = _.random(10) + 2
             if(result === 7){
                 let robbed = await findRobbedByRobber(socket.game)
+                emit('Dice Result',{dice:result})
                 if(robbed.length !== 0){
                     await changeToWaitingState('Discard Cards',robbed)
-                    emit('Dice result',{dice:result})
                     await moveRobber()
                 }
             }
             else{
-                await doDiceRoll(socket.game,result)
-                emit('Dice Result',{dice:result})
+                const resource = await doDiceRoll(socket.game,result)
+                emit('Dice Result',{dice:result,resource})
             }
+            console.log('setting turn to 2')
             setTurnSpecificInfo('phase',2)
         })
 
         attachWaitingActionToSocket('Discard Cards',async ({resource})=>{
             let total = 0
-            for(let kind of resource){
-                total+=socket.user[kind]
+            for(let kind in resource){
+                total+=resource[kind]
             }
-            if(total === Math.ceil((await findTotalResources(socket.game,socket.userid)) / 2)){
-                await doChangePlayerResource(resource)
+            const totalResources = await findTotalResources(socket.game,socket.userid)
+            console.log(total,totalResources)
+            if(total === Math.ceil((totalResources/2))){
                 await doNegativePlayerResource(socket.game,socket.userid,resource)
+                emit('Discard Cards',{resource,id:socket.userid})
             }
             else throw Error('Not the right amount of resources')
         })
 
         attachActionToSocket("Trade Initiation",actionFunctionFactory(({players,resources})=>{
             const codes = players.map(e=>addNewTradingThread(socket.userid,e))
-            emitWithoutSelf("Trade Initiation",{players,resources,codes})
-        }))
+            emit("Trade Initiation",{players,resources,codes})
+        }),true)
 
         attachWaitingActionToSocket('Build Settlement Initial',async ({position})=>{
+            console.log(socket.game)
             const tf = await doBuildSettlementInitial(socket.game,socket.userid,position)
             if(!tf) throw Error('Invalid position')
-            else emitWithoutSelf('Build Settlement Initial',{position})
+            else emit('Build Settlement Initial',{position,turn:socket.userid,resource:tf})
         })
 
         attachWaitingActionToSocket('Build Road Initial',async ({settlementPosition,roadPosition})=>{
             await socket.game.save()
             const tf1 = await doBuildRoadInitial(socket.game,socket.userid,settlementPosition,roadPosition)
             if(!tf1) throw Error('Invalid road')
-            else emitWithoutSelf('Build Road Initial',{roadPosition})
+            else emit('Build Road Initial',{roadPosition,turn:socket.userid})
         })
 
         attachTradingAction('Trade Acceptance',async ({code,resources})=>{
@@ -309,17 +336,17 @@ module.exports = (io)=>{
             await doChangePlayerResource(socket.game,otherPlayer,resource1)
             await doNegativePlayerResource(socket.game,socket.userid,resource1)
             await doNegativePlayerResource(socket.game,otherPlayer,resource2)
-            emitWithoutSelf("Trade Acceptance",players,resource)
+            emit("Trade Acceptance",{code,resources,players:[socket.userid,otherPlayer]})
             closeTradingThread(code)
         })
 
         attachTradingAction('Trade Refuse',({code})=>{
-            emitWithoutSelf('Trade Refuse',{code})
+            emit('Trade Refuse',{code})
             closeTradingThread(code)
         })
 
         attachTradingAction('Trade Response',({resources,code})=>{
-            emitWithoutSelf('Trade Response',{resources,code})
+            emit('Trade Response',{resources,code})
         })
         
         attachActionToSocket('Trade with Bank',async ({resource})=>{
@@ -357,59 +384,66 @@ module.exports = (io)=>{
 
         attachPhase2ActionToSocket("Build road",async ({position})=>{
             const road = await doBuildRoad(socket.game,socket.userid,position)
-            console.log(road,'road')
             if(!road) throw Error(actionErrorMessage)
         })
 
         attachPhase2ActionToSocket('Build settlements',async ({position})=>{
             const settlement = await doBuildSettlement(socket.game,socket.userid,position)
-            console.log(settlement,'settlement')
             if(!settlement) throw Error(actionErrorMessage)
         })
 
         attachPhase2ActionToSocket('Build city',async ({position})=>{
             const city = await doBuildCity(socket.game,socket.userid,position)
-            console.log(city,'city')
             if(!city) throw Error(actionErrorMessage)
         })
 
-        attachActionToSocket('Use development card',async (data)=>{
+        attachDevActionToSocket(async (data)=>{
             if(getTurnSpecificInfo('phase') !== 2 && data.card !== 'Knight') throw Error("You cannot do this action at this time")
             const {card} = data
             if(getTurnSpecificInfo('usedDevelopmentCard')) return
             setTurnSpecificInfo('usedDevelopmentCard',true)
             const doYouHaveTheCard = await doUseDevelopmentCard(socket.game,socket.userid,card)
             if(!doYouHaveTheCard) throw Error("You do not have that card")
+            emit('Use development card',data)
             switch(card){
                 case 'Monopoly':
-                    const r = data.resource
-                    if(r !== 'Wheat' && r !== 'Brick' && r !== 'Sheep' && r !== 'Wood' && r !== 'Rock') return false
-                    await doUseMonopolyCard(socket.game,socket.userid,r)
-                    emitWithoutSelf("Monopoly resource chosen",{resource:r})
+                    const r = await awaitAction('Choose Monopoly resources')
+                    console.log(r)
+                    if(r !== 'wheat' && r !== 'brick' && r !== 'sheep' && r !== 'wood' && r !== 'rock') throw Error("Not the right resources")
+                    let totalResourceChange = await doUseMonopolyCard(socket.game,socket.userid,r)
+                    emit("Monopoly resource chosen",{resource:r,change:totalResourceChange})
                     break;
                 case "Knight":
                     moveRobber()
                     break
                 case "Plenty":
-                    const resource = await awaitAction('Choose Plenty resources')
+                    console.log('plenty1')
+                    const res = await awaitAction('Choose Plenty resources')
+                    console.log('plenty2')
                     let totalResource = 0
-                    for(r of resource){
-                        totalResource+=resource[r]
+                    for(r in res){
+                        totalResource+=res[r]
                     }
                     if(totalResource !== 2) throw Error("More than 2 resources")
-                    for(r of resource){
-                        socket.user[`${r.toLowerCase()}Amount`]+=resource[r]
+                    for(r in res){
+                        socket.user[`${r.toLowerCase()}Amount`]+=res[r]
                     }
-                    game.save()
-                    emitWithoutSelf("Plency card chosen",{resource})
+                    await socket.game.save()
+                    emit("Plenty card chosen",{res})
                     break
                 case "Road":
-                    const {positions} = data
+                    const {positions} = await awaitAction('Choose Road location')
+                    console.log(positions)
                     if(!positions) throw Error("Position invalid")
                     if(positions.length !== 2) throw Error("Not the right amount of roads")
-                    const tf1 = await doBuildRoadInitial(socket.game,socket.userid,positions[0])
-                    const tf2 = await doBuildRoadInitial(socket.game,socket.userid,positions[1])
+                    socket.user.brickAmount += 2
+                    socket.user.woodAmount += 2
+                    await socket.game.save()
+                    const tf1 = await doBuildRoad(socket.game,socket.userid,positions[0])
+                    if(!tf1) throw Error("Positions invalid")
+                    const tf2 = await doBuldRoad(socket.game,socket.userid,positions[1])
                     if(!(tf1 && tf2)) throw Error("Positions invalid")
+                    emit('Road location chosen',{positions})
                     break
                 default:
                     throw Error("That card does not exist/Cannot be played.")
@@ -423,12 +457,14 @@ module.exports = (io)=>{
 
         socket.on('Cheat',async ()=>{
             await doChangePlayerResource(socket.game,socket.userid,{
-                wheat:500,
-                rock:500,
-                wood:500,
-                brick:500,
-                sheep:500
+                wheat:5,
+                rock:5,
+                wood:5,
+                brick:5,
+                sheep:5
             })
+            socket.user.developmentCards = ['Knight','Point','Monopoly','Plenty','Road']
+            await socket.game.save()
             socket.emit("Cheat Done",socket.user)
         })
     })

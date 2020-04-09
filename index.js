@@ -22,16 +22,20 @@ const {addPlayerToGame,playerSchema,gridSchema,gameSchema,Player,Grid,Game,findP
 
 require('./socket')(io)
 
+app.use(express.static('./build'));
+const path = require('path');
+app.get('/',(req,res)=>{res.sendFile(path.join(__dirname,'./build','index.html'))});
+
 app.post('/register',async (req,res)=>{
     const {roomCode,username} = req.body
     if(!username) return res.send({error:true,message:'Please enter a username'})
     if(!roomCode) return res.send({error:true,message:'Please enter a room code'})
-    const game = (await Game.findOne({roomCode}).select("players roomCode inGame"))
+    const game = await Game.findOne({roomCode})
     if(!game) return res.send({error:true,message:"Room not found"})
     else if(game.players.length === 4) return res.send({error:true,message:'Room is full'})
     else if(game.inGame) return res.send({error:true,message:"There's a game progressing in this room."})
     else{
-        const id = await addPlayerToGame(game._id,username)
+        const id = await addPlayerToGame(game,username)
         const token = await jwt.sign({userid:id,roomCode},process.env.SECRET_KEY)
         return res.send({token})
     }

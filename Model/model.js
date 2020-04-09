@@ -379,7 +379,7 @@ const doCreateGrid = (()=>{
 
     const numberReference = [
         2,12,
-        3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11
+        3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11
     ]
 
     const port = ()=>({resource:(getRandomThenRemove(portTileReference)),number:null})
@@ -445,6 +445,7 @@ const findPossibleInitialSettlementLocation = gridFunctionFactory(async (grid,ga
 
 const findResourceFromDice = gridFunctionFactory(async (grid,game,diceNumber)=>{
     const positions = []
+    console.log(diceNumber)
     for(y = 0;y<grid.numberBoard.length;y++){
         for(x=0;x<grid.numberBoard[y].length;x++){
             if(grid.numberBoard[y][x] === diceNumber){
@@ -452,6 +453,7 @@ const findResourceFromDice = gridFunctionFactory(async (grid,game,diceNumber)=>{
             }
         }
     }
+    console.log(positions)
     return positions.map(([y,x])=>[y,x,grid.resourceBoard[y][x]])
 })
 
@@ -474,7 +476,6 @@ const doBuildCityGrid = gridFunctionFactory(async (grid,game,position)=>{
 })
 
 const doBuildRoadGrid = gridFunctionFactory(async (grid,game,position)=>{
-    grid.structures.push(position)
     grid.roads.push(position)
     await game.save()
 })
@@ -514,9 +515,9 @@ const thereIsAStructureAt = gridFunctionFactory(async (grid,game,p)=>{
 })
 const findValidPlacesToBuildAStructure = gridFunctionFactory(async (grid,game,position)=>{
     const adjacents = await findAdjacentPositionsTo(game,position)
-    for(p of adjacents){
+    for(let p of adjacents){
         const tf = await thereIsAStructureAt(game,p)
-        if(tf) return false
+        if(tf) return true
     }
     return true
 })
@@ -546,6 +547,7 @@ const findRobberProspectiveLocations = gridFunctionFactory(async (grid)=>{
 const doMoveRobberTo = gridFunctionFactory(async (grid,game,[y,x])=>{
     if(! await findOutIfItIsAValidPlaceToMoveTheRobber(game,[y,x])) return false
     grid.robberPosition = [y,x]
+    await game.save()
     let playersRobbed = []
     BigLoop:for(let i = 0;i<game.players.length;i++){
         let player = game.players[i]
@@ -592,18 +594,13 @@ const findAllPossibleSettlementLocation = asyncWrapper(async (game,playerId)=>{
         if(!isThereThisPositionInThisArray(topHead,allRoadHeads)) allRoadHeads.push(topHead)
         if(!isThereThisPositionInThisArray(bottomHead,allRoadHeads)) allRoadHeads.push(bottomHead)
     })
-    allRoadHeads = await allRoadHeads.filter(async (head)=>{
-        const structureAt = await thereIsAStructureAt(game,head)
-        const structureAround = await findValidPlacesToBuildAStructure(game,head)
-        if(structureAt) return false
-        return (structureAround)
-    })
+
     let i = 0
     while(i<allRoadHeads.length){
         const head = allRoadHeads[i]
         const structureAt = await thereIsAStructureAt(game,head)
         const structureAround = await findValidPlacesToBuildAStructure(game,head)
-        if(structureAt||structureAround){
+        if((structureAt)||structureAround){
             allRoadHeads.splice(i,1)
         }
         else i++
@@ -615,11 +612,41 @@ const findAllPossibleSettlementLocation = asyncWrapper(async (game,playerId)=>{
 const doBuildSettlement = asyncWrapper(async (gameId,playerId,position)=>{
     let newPosition = [...position].flat()
     const allPossible = await findAllPossibleSettlementLocation(gameId,playerId)
+    console.log(allPossible)
     if(!isThereThisPositionInThisArray(newPosition,allPossible)) return false
+    console.log('settlement2')
     if(gameId.players[playerId].settlements.length === 5) return false
+    console.log('settlement3')
     const tf = await canBuildSettlementPlayer(gameId,playerId)
     if(!tf) return false
-    await doBuildSettlementGrid(gameId,newPosition)
+    console.log('settlement4')
+    const tradingPrivelleges = await doBuildSettlementGrid(gameId,newPosition)
+    if(tradingPrivelleges.length>0){
+        for(p of tradingPrivelleges){
+            switch(p){
+                case 'Random trade':
+                    gameId.players[playerId].randomTrade = true
+                case 'Wheat trade':
+                    gameId.players[playerId].wheatTrade = true
+                    break
+                case 'Brick trade':
+                    gameId.players[playerId].brickTrade = true
+                    break
+                case 'Sheep trade':
+                    gameId.players[playerId].sheepTrade = true
+                    break
+                case 'Rock trade':
+                    gameId.players[playerId].rockTrade = true
+                    break;
+                case 'Wood trade':
+                    gameId.players[playerId].woodTrade = true
+                    break;
+                default:
+                    break;
+            }
+        }
+        await gameId.save()
+    }
     await doBuildSettlementPlayer(gameId,playerId,newPosition)
     return position
 })
@@ -652,8 +679,44 @@ const doBuildSettlementInitial = asyncWrapper(async (game,playerid,position)=>{
     const possibles = await findPossibleInitialSettlementLocation(game)
     if(!isThereThisPositionInThisArray(newPosition,possibles)) return false
     await doBuildSettlementInitialPlayer(game,playerid,newPosition)
-    await doBuildSettlementGrid(game,newPosition)
-    return position
+    const tradingPrivelleges = await doBuildSettlementGrid(game,newPosition)
+    console.log(tradingPrivelleges)
+    if(tradingPrivelleges.length>0){
+        for(p of tradingPrivelleges){
+            console.log(p)
+            switch(p){
+                case 'Random trade':
+                    game.players[playerid].randomTrade = true
+                    break;
+                case 'Wheat trade':
+                    game.players[playerid].wheatTrade = true
+                    break
+                case 'Brick trade':
+                    game.players[playerid].brickTrade = true
+                    break
+                case 'Sheep trade':
+                    game.players[playerid].sheepTrade = true
+                    break
+                case 'Rock trade':
+                    game.players[playerid].rockTrade = true
+                    break;
+                case 'Wood trade':
+                    game.players[playerid].woodTrade = true
+                    break;
+                default:
+                    break;
+            }
+        }
+        await game.save()
+    }
+    let resource = position.map(([y,x])=>game.grid.resourceBoard[y][x])
+    let possible = ['Wheat','Sheep','Rock','Wood','Brick']
+    resource = resource.filter(e=>possible.includes(e))
+    for(let e of resource){
+        game.players[playerid][`${e.toLowerCase()}Amount`]+=1
+    }
+    await game.save()
+    return resource
 })
 
 const doBuildRoadInitial = asyncWrapper(async (game,playerid,settlementPosition,roadPosition)=>{
@@ -725,7 +788,7 @@ const findWinCondition = asyncWrapper(async (game)=>{
     }
     armySize = armySize.sort(([size1],[size2])=>size1-size2)
     players[armySize[0][1]].biggestArmy = true
-    if(game.currentLargestArmyPlayer !== armySize[0][1]){
+    if(game.currentLargestArmyPlayer !== armySize[0][1] && armySize[0][1]>=3){
         game.currentLargestArmyPlayer = armySize[0][1]
         result.armyChange = armySize[0][1]
     }
@@ -737,7 +800,7 @@ const findWinCondition = asyncWrapper(async (game)=>{
     }
     roadLength = roadLength.sort(([size1],[size2])=>size1-size2)
     players[roadLength[0][1]].longestRoad = true
-    if(game.currentLongestRoadPlayer !== roadLength[0][1]){
+    if(game.currentLongestRoadPlayer !== roadLength[0][1] && roadLength[0][1]>=5){
         game.currentLongestRoadPlayer = roadLength[0][1]
         result.roadChange = roadLength[0][1]
     }
@@ -767,38 +830,48 @@ const doDiceRoll = asyncWrapper(async (game,roll)=>{
         if(resource === 'Wood') player.woodAmount+=amount
         if(resource === 'Brick') player.brickAmount+=amount
     }
+    const result = game.players.map(e=>[])
 
-    resources.forEach(([y,x,resources])=>{
+    resources.forEach(([y,x,resource])=>{
         if(([y,x])!==game.grid.robberPosition){
-            game.players.forEach((player)=>{
-                player.cities.forEach(position=>{
-                    if(position[0] === [y,x] || position[1] === [y,x] || position[2] === [y,x]){
-                        addResource(resources,2,player)
+            game.players.forEach((player,i)=>{
+                player.cities.forEach(p=>{
+                    const position = _.chunk(p,2)
+                    if(compareDoubleArray(position[0],[y,x]) || compareDoubleArray(position[1],[y,x]) || compareDoubleArray(position[2],[y,x])){
+                        addResource(resource,2,player)
+                        result[i].push([resource,2,[y,x]])
                     }
                 })
-                player.settlements.forEach(position=>{
-                    if(position[0] === [y,x] || position[1] === [y,x] || position[2] === [y,x]){
-                        addResource(resources,1,player)
+                player.settlements.forEach(p=>{
+                    const position = _.chunk(p,2)
+                    if(compareDoubleArray(position[0],[y,x]) || compareDoubleArray(position[1],[y,x]) || compareDoubleArray(position[2],[y,x])){
+                        addResource(resource,1,player)
+                        result[i].push([resource,1,[y,x]])
                     }
                 })
             })
         }
     })
     await game.save()
+    return result
 })
 //TODO: FIX WORLD GENERATING
 const doUseMonopolyCard = asyncWrapper(async (game,playerid,resource)=>{
     let totalResourceChange = 0
     const resourceName = resource.toLowerCase() + 'Amount'
+    const resourceByPlayer = game.playerUsernames.map(e=>0)
     game.players.forEach((player,index)=>{
         if(index !== playerid){
             const number = player[resourceName]
             player[resourceName] = 0
             totalResourceChange+=number
+            resourceByPlayer[index] = number
         }
     })
     game.players[playerid][resourceName] += totalResourceChange
+    resourceByPlayer[playerid] = totalResourceChange
     await game.save()
+    return resourceByPlayer
 })
 
 const findOutIfItIsAValidPlaceToMoveTheRobber = asyncWrapper(async (game,position)=>{
@@ -841,7 +914,7 @@ const doStealFromAnotherPerson = asyncWrapper(async (game,stealer,stolener)=>{
     return resource
 })
 
-module.exports = {doNegativePlayerResource,doStealFromAnotherPerson,doDiceRoll,findRobbedByRobber,passTurn,doBuildRoadInitial, doBuildSettlementInitial,addPlayerToGame,playerSchema,gridSchema,gameSchema,Player,Grid,Game,findPoint,findTotalKnight,findPossibleActions,findLongestRoadLength,doBuyDevelopmentCard,doUseDevelopmentCard
+module.exports = {findTotalResources,doNegativePlayerResource,doStealFromAnotherPerson,doDiceRoll,findRobbedByRobber,passTurn,doBuildRoadInitial, doBuildSettlementInitial,addPlayerToGame,playerSchema,gridSchema,gameSchema,Player,Grid,Game,findPoint,findTotalKnight,findPossibleActions,findLongestRoadLength,doBuyDevelopmentCard,doUseDevelopmentCard
 ,doBuildSettlementPlayer,doBuildCityPlayer,doBuildRoadPlayer,canBuildSettlementPlayer,canBuildRoadPlayer,doCreateGrid,allGridLocation,findPossibleInitialSettlementLocation,findResourceFromDice,doBuildSettlementGrid,
 doBuildCityGrid,doBuildRoadGrid,findAdjacentPositionsTo,thereIsAStructureAt,findValidPlacesToBuildAStructure,findIfThereIsARoadAt,findRobberProspectiveLocations,doMoveRobberTo,doCreateGame,doBuildSettlement,doBuildCity,
 doBuildRoad,findAllPossibleRoadLocationFor,findWinCondition,doChangePlayerResource,canBuyDevelopmentCardPlayer,doUseMonopolyCard,findOutIfItIsAValidPlaceToMoveTheRobber}
