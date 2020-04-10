@@ -265,7 +265,6 @@ module.exports = (io)=>{
             socketMap.set(socket.roomCode,[])
         }
         socketMap.set(socket.roomCode,[...socketMap.get(socket.roomCode),socket.id])
-        if(socket.game.players.length === 4) startGame(socket.game)
         //Initiation ended
 
         //Events
