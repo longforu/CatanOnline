@@ -353,7 +353,7 @@ module.exports = (io)=>{
         })
 
         attachTradingAction('Trade Response',({resources,code})=>{
-            emit('Trade Response',{resources,code})
+            emitWithoutSelf('Trade Response',{resources,code})
         })
         
         attachActionToSocket('Trade with Bank',async ({resource})=>{
