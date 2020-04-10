@@ -1,4 +1,3 @@
-const mongoose = require('mongoose')
 const jwt = require('jsonwebtoken')
 const {doNegativePlayerResource,doStealFromAnotherPerson,doDiceRoll,findRobbedByRobber,passTurn,Game,doBuyDevelopmentCard,doUseDevelopmentCard,doMoveRobberTo,doBuildSettlement,doBuildCity,
     doBuildRoad,findWinCondition,doChangePlayerResource,doUseMonopolyCard,findTotalResources,doBuildSettlementInitial,doBuildRoadInitial} = require('./Model/model')
@@ -10,11 +9,62 @@ module.exports = (io)=>{
     const timerMap = new Map()
     const turnSpecificInfo = new Map()
     const tradingThreads = new Map()
+    const mailBox = new Map()
 
     io.on('connect',async (socket)=>{
+        const {roomCode,userid} = jwt.verify(socket.handshake.query.token,process.env.SECRET_KEY)
+        if(userid === undefined || !roomCode){
+            socketError("Credential is invalid")
+            socket.disconnect()
+            return;
+        }
+        socket.roomCode = roomCode
+        socket.userid = userid
+        socket.game = await Game.findOne({roomCode})
 
-        const emit = (message,arg)=>io.to(socket.roomCode).emit(message,arg)
-        const emitWithoutSelf = (message,arg)=>socket.to(socket.roomCode).emit(message,arg)
+        const addToMail = (userid,message,data)=>{
+            if(!mailBox.has(socket.roomCode)) return
+            const box = mailBox.get(socket.roomCode)
+            box[userid].push([message,data])
+            mailBox.set(socket.roomCode,box)
+        }
+        
+        const emit = (message,arg)=>{
+            for(let i = 0;i<socket.game.players.length;i++){addToMail(i,message,arg)}
+            io.to(socket.roomCode).emit(message,arg)
+        }
+        const emitWithoutSelf = (message,arg)=>{
+            for(let i = 0;i<socket.game.players.length;i++){if(i!==socket.userid) addToMail(i,message,arg)}
+            socket.to(socket.roomCode).emit(message,arg)
+        }
+        socket.on('Confirm',()=>{
+            const box = mailBox.get(socket.roomCode)
+            box[userid] = []
+            mailBox.set(socket.roomCode,box)
+        })
+        console.log(socket.game)
+        socket.user = socket.game.players[socket.userid]
+        socket.username = socket.game.playerUsernames[socket.userid]
+        socket.join(socket.roomCode)
+        const gameData = socket.game.toObject()
+        if(!socketMap.has(socket.roomCode)){
+            socketMap.set(socket.roomCode,[])
+        }
+        if(!mailBox.has(socket.roomCode)){
+            mailBox.set(socket.roomCode,[])
+        }
+        const myMail = mailBox.get(socket.roomCode)
+        myMail.forEach(([message,data])=>socket.emit(message,data))
+        myMail[socket.userid] = []
+        mailBox.set(socket.roomCode,myMail)
+        const socketArray = socketMap.get(socket.roomCode)
+        socketArray[socket.userid] = socket.id
+        socketMap.set(socket.roomCode,socketArray)
+        socket.on('disconnect',()=>{
+            const socketArray = socketMap.get(socket.roomCode)
+            socketArray[socket.userid] = socket.id
+            socketMap.set(socket.roomCode,socketArray)
+        })
 
         const resetTurnSpecificInfo = ()=>{
             turnSpecificInfo.set(socket.roomCode,{
@@ -245,31 +295,6 @@ module.exports = (io)=>{
         })
 
         //Intiating the socket for use
-        const {roomCode,userid} = jwt.verify(socket.handshake.query.token,process.env.SECRET_KEY)
-        if(userid === undefined || !roomCode){
-            socketError("Credential is invalid")
-            socket.disconnect()
-            return;
-        }
-        socket.roomCode = roomCode
-        socket.userid = userid
-        socket.game = await Game.findOne({roomCode})
-        console.log(socket.game)
-        socket.user = socket.game.players[socket.userid]
-        socket.username = socket.game.playerUsernames[socket.userid]
-        socket.join(socket.roomCode)
-        const gameData = socket.game.toObject()
-        if(!socketMap.has(socket.roomCode)){
-            socketMap.set(socket.roomCode,[])
-        }
-        const socketArray = socketMap.get(socket.roomCode)
-        socketArray[socket.userid] = socket.id
-        socketMap.set(socket.roomCode,socketArray)
-        socket.on('disconnect',()=>{
-            const socketArray = socketMap.get(socket.roomCode)
-            socketArray[socket.userid] = socket.id
-            socketMap.set(socket.roomCode,socketArray)
-        })
         //Initiation ended
 
         //Events
