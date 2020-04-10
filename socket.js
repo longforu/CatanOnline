@@ -258,18 +258,26 @@ module.exports = (io)=>{
         socket.user = socket.game.players[socket.userid]
         socket.username = socket.game.playerUsernames[socket.userid]
         socket.join(socket.roomCode)
-        emitWithoutSelf('New player',{username:socket.username})
         const gameData = socket.game.toObject()
-        socket.emit("Game data",{gameData})
         if(!socketMap.has(socket.roomCode)){
             socketMap.set(socket.roomCode,[])
         }
-        socketMap.set(socket.roomCode,[...socketMap.get(socket.roomCode),socket.id])
+        const socketArray = socketMap.get(socket.roomCode)
+        socketArray[socket.userid] = socket.id
+        socketMap.set(socket.roomCode,socketArray)
+        socket.on('disconnect',()=>{
+            const socketArray = socketMap.get(socket.roomCode)
+            socketArray[socket.userid] = socket.id
+            socketMap.set(socket.roomCode,socketArray)
+        })
         //Initiation ended
 
         //Events
 
         socket.on("Start game",asyncSocketWrap(()=>{if(socket.userid ===0) startGame(socket.game); }))
+
+        socket.on('Request game data',socketFunctionFactory(()=>socket.emit('Game data',{gameData:socket.game.toObject()})))
+        socket.on('Request new player',socketFunctionFactory(()=>emitWithoutSelf('New player',{username:socket.username})))
 
         attachPhase2ActionToSocket('Pass Turn',()=>{
             cancelTurnTimer()
